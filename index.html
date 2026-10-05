@@ -1,0 +1,795 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#262626" />
+    <title>Cardápio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ["Figtree", "system-ui", "sans-serif"] },
+          },
+        },
+      };
+    </script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        scrollbar-width: none;
+      }
+      @keyframes pop {
+        0% {
+          transform: scale(0.4);
+          opacity: 0;
+        }
+        70% {
+          transform: scale(1.08);
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+      @keyframes draw {
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+      .pop {
+        animation: pop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+      }
+      .check {
+        stroke-dasharray: 50;
+        stroke-dashoffset: 50;
+        animation: draw 0.5s 0.35s ease forwards;
+      }
+      .safe {
+        padding-bottom: max(1rem, env(safe-area-inset-bottom));
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-neutral-100 text-neutral-900 antialiased font-sans">
+    <div id="app" class="max-w-md mx-auto min-h-screen bg-white pb-28">
+      <p class="p-10 text-center text-neutral-500">Carregando cardápio…</p>
+    </div>
+
+    <!-- Barra flutuante da comanda -->
+    <div
+      id="bar"
+      class="fixed bottom-0 inset-x-0 z-30 px-4 safe pt-2 translate-y-full pointer-events-none transition-transform duration-300"
+    >
+      <button
+        data-action="abrir"
+        class="max-w-md mx-auto w-full flex items-center justify-between bg-orange-600 text-white rounded-2xl px-5 py-4 shadow-xl shadow-orange-700/30 active:scale-[.98] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
+      >
+        <span class="font-semibold"
+          >Ver Comanda • <span id="barQtd"></span
+        ></span>
+        <span id="barTotal" class="font-extrabold"></span>
+      </button>
+    </div>
+
+    <!-- Modal de revisão -->
+    <div
+      id="modal"
+      class="fixed inset-0 z-40 bg-white hidden flex-col translate-y-full transition-transform duration-300"
+    >
+      <div class="max-w-md mx-auto w-full h-full flex flex-col">
+        <div
+          class="flex items-center justify-between px-5 py-4 bg-neutral-900 text-white"
+        >
+          <div>
+            <h2 class="text-lg font-bold">Sua comanda</h2>
+            <p id="modalMesa" class="text-sm text-neutral-400"></p>
+          </div>
+          <button
+            data-action="fechar"
+            aria-label="Fechar"
+            class="w-10 h-10 rounded-full bg-white/10 text-2xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+        <ul id="modalItens" class="flex-1 overflow-y-auto px-5"></ul>
+        <div class="safe px-5 pt-4 border-t border-neutral-200 bg-white">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-neutral-500">Total</span
+            ><span id="modalTotal" class="text-2xl font-extrabold"></span>
+          </div>
+          <p id="erroEnvio" class="hidden mb-3 text-sm text-red-600"></p>
+          <button
+            id="confirmBtn"
+            data-action="enviar"
+            class="w-full py-4 rounded-2xl bg-orange-600 text-white text-lg font-bold shadow-lg shadow-orange-700/30 active:scale-[.98] transition disabled:opacity-60"
+          >
+            Confirmar e Enviar Pedido
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pedido enviado -->
+    <div
+      id="ok"
+      class="fixed inset-0 z-50 hidden flex-col items-center justify-center text-center p-8 bg-neutral-900 text-white"
+    >
+      <div
+        class="pop w-24 h-24 rounded-full bg-orange-600 flex items-center justify-center shadow-2xl shadow-orange-600/40"
+      >
+        <svg
+          viewBox="0 0 52 52"
+          class="w-12 h-12"
+          fill="none"
+          stroke="#fff"
+          stroke-width="5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path class="check" d="M14 27l8 8 16-17" />
+        </svg>
+      </div>
+      <h2 class="mt-8 text-2xl font-extrabold">Pedido Enviado com Sucesso!</h2>
+      <p class="mt-2 text-neutral-300">Seu pedido já está na cozinha.</p>
+      <p id="okInfo" class="mt-6 text-sm text-neutral-400"></p>
+      <button
+        data-action="novo"
+        class="mt-10 px-8 py-3 rounded-full border border-white/25 font-semibold"
+      >
+        Acompanhar meu pedido
+      </button>
+    </div>
+
+    <!-- Comanda encerrada pelo caixa -->
+    <div
+      id="fim"
+      class="fixed inset-0 z-[60] hidden flex-col items-center justify-center text-center p-8 bg-neutral-900 text-white"
+    >
+      <div
+        class="w-20 h-20 rounded-full bg-white/10 flex items-center justify-center"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          class="w-10 h-10 text-orange-500"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M5 13l4 4L19 7" />
+        </svg>
+      </div>
+      <h2 class="mt-8 text-2xl font-extrabold">Conta encerrada</h2>
+      <p class="mt-2 max-w-xs text-neutral-300">
+        Obrigado pela visita! Para fazer um novo pedido, aproxime o celular da
+        tag da mesa novamente.
+      </p>
+    </div>
+
+    <script>
+      /* ========= Configuração ========= */
+      const USAR_MOCK = false; // true = dados fictícios (sem backend)
+      const API_BASE = "/api"; // a API fica sob /api no server.js
+      const CAPA =
+        "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=900&q=70&auto=format&fit=crop";
+      const img = (id) =>
+        `https://images.unsplash.com/photo-${id}?w=300&q=70&auto=format&fit=crop`;
+
+      /* ========= Mock (mesma estrutura do GET /m/:nfcId) ========= */
+      const MOCK_MESA = {
+        restaurante: {
+          id: "665f0c1a2b3c4d5e6f700001",
+          nome: "Cantina Brasa & Lenha",
+          slug: "brasa-lenha",
+          logoUrl: null,
+        },
+        mesa: {
+          id: "665f0c1a2b3c4d5e6f700012",
+          numero: 12,
+          descricao: "Varanda",
+        },
+        sessaoId: "mock-sessao-1",
+        cardapio: [
+          {
+            categoria: "Porções",
+            produtos: [
+              {
+                id: "p1",
+                nome: "Batata Frita Rústica",
+                descricao: "Batata com casca, alho, alecrim e molho da casa.",
+                preco: 3290,
+                imagemUrl: img("1573080496219-bb080dd4f877"),
+              },
+              {
+                id: "p2",
+                nome: "Espetinho Misto (4 un.)",
+                descricao:
+                  "Carne, frango, coração e linguiça na brasa com farofa.",
+                preco: 3890,
+                imagemUrl: img("1555939594-58d7cb561ad1"),
+              },
+              {
+                id: "p3",
+                nome: "Salada da Casa",
+                descricao:
+                  "Folhas, tomate cereja, queijo coalho e molho de mel.",
+                preco: 2490,
+                imagemUrl: img("1546069901-ba9599a7e63c"),
+              },
+            ],
+          },
+          {
+            categoria: "Pratos",
+            produtos: [
+              {
+                id: "p4",
+                nome: "Picanha na Chapa",
+                descricao:
+                  "Picanha grelhada, arroz, feijão tropeiro e vinagrete.",
+                preco: 6890,
+                imagemUrl: img("1544025162-d76694265947"),
+              },
+              {
+                id: "p5",
+                nome: "Hambúrguer Artesanal",
+                descricao: "Blend 180g, cheddar, cebola caramelizada e fritas.",
+                preco: 3590,
+                imagemUrl: img("1568901346375-23c9450c58cd"),
+              },
+            ],
+          },
+          {
+            categoria: "Bebidas",
+            produtos: [
+              {
+                id: "p6",
+                nome: "Caipirinha de Limão",
+                descricao: "Cachaça artesanal, limão tahiti e açúcar.",
+                preco: 2290,
+                imagemUrl: img("1544145945-f90425340c7e"),
+              },
+              {
+                id: "p7",
+                nome: "Suco Natural",
+                descricao: "Laranja, limão ou abacaxi com hortelã (400 ml).",
+                preco: 1290,
+                imagemUrl: img("1551024709-8f23befc6f87"),
+              },
+              {
+                id: "p8",
+                nome: "Refrigerante Lata",
+                descricao: "Lata 350 ml, gelada.",
+                preco: 790,
+                imagemUrl: null,
+              },
+            ],
+          },
+          {
+            categoria: "Sobremesas",
+            produtos: [
+              {
+                id: "p9",
+                nome: "Petit Gâteau",
+                descricao: "Bolinho de chocolate quente com sorvete de creme.",
+                preco: 2490,
+                imagemUrl: img("1488477181946-6428a0291777"),
+              },
+              {
+                id: "p10",
+                nome: "Sorvete Artesanal",
+                descricao: "Duas bolas à escolha, com calda.",
+                preco: 1690,
+                imagemUrl: img("1563805042-7684c019e1cb"),
+              },
+            ],
+          },
+        ],
+      };
+
+      /* ========= Camada de API ========= */
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+      async function apiGetMesa(nfcId) {
+        if (USAR_MOCK) {
+          await sleep(500);
+          return structuredClone(MOCK_MESA);
+        }
+        const r = await fetch(`${API_BASE}/m/${encodeURIComponent(nfcId)}`);
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok)
+          throw new Error(d.erro || "Não foi possível carregar o cardápio");
+        return d;
+      }
+
+      async function apiPostPedido(payload) {
+        if (USAR_MOCK) {
+          await sleep(1400);
+          const total = payload.itens.reduce(
+            (s, i) => s + prod.get(i.produtoId).preco * i.quantidade,
+            0,
+          );
+          const id = [...crypto.getRandomValues(new Uint8Array(3))]
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("")
+            .toUpperCase();
+          return { pedidoId: id, status: "recebido", total };
+        }
+        const r = await fetch(`${API_BASE}/pedidos`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          const err = new Error(d.erro || "Não foi possível enviar o pedido");
+          err.codigo = d.codigo; // ex.: SESSAO_ENCERRADA
+          throw err;
+        }
+        return d;
+      }
+
+      /* ========= Utilitários ========= */
+      const $ = (id) => document.getElementById(id);
+      const brl = (c) =>
+        new Intl.NumberFormat("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+        }).format(c / 100);
+      // Imagem quebrada: remove o <img> e deixa o fundo cinza (sem handler inline, por causa da CSP)
+      document.addEventListener(
+        "error",
+        (e) => {
+          if (e.target.tagName === "IMG") e.target.remove();
+        },
+        true,
+      );
+      const esc = (s) =>
+        String(s ?? "").replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
+
+      /* ========= Estado ========= */
+      let data = null;
+      const prod = new Map(); // id -> produto
+      const cart = new Map(); // id -> { qty, obs }
+
+      const totais = () => {
+        let n = 0,
+          total = 0;
+        for (const [id, it] of cart) {
+          n += it.qty;
+          total += prod.get(id).preco * it.qty;
+        }
+        return { n, total };
+      };
+
+      function changeQty(id, d) {
+        const it = cart.get(id) || { qty: 0, obs: "" };
+        it.qty += d;
+        if (it.qty <= 0) cart.delete(id);
+        else cart.set(id, it);
+        navigator.vibrate?.(8);
+        syncCard(id);
+        syncBar();
+        if (!$("modal").classList.contains("hidden")) {
+          if (cart.size === 0) fecharModal();
+          else renderModal();
+        }
+      }
+
+      /* ========= Renderização ========= */
+      const stepper = (id, q) => `
+  <div class="flex items-center h-9 bg-white rounded-full shadow-lg ring-1 ring-neutral-200">
+    <button data-action="dec" aria-label="Remover um" class="w-8 h-9 text-xl text-orange-600">−</button>
+    <span class="w-5 text-center text-sm font-bold">${q}</span>
+    <button data-action="inc" aria-label="Adicionar um" class="w-8 h-9 text-xl text-orange-600">+</button>
+  </div>`;
+      const addBtn = `<button data-action="add" aria-label="Adicionar ao pedido" class="w-9 h-9 rounded-full bg-orange-600 text-white text-xl leading-none shadow-lg active:scale-90 transition">+</button>`;
+
+      function cardHTML(p) {
+        // Se a imagem for nula ou vazia, podemos usar uma imagem padrão de bebida ou comida
+        const imagemSrc = p.imagemUrl || "https://images.unsplash.com/photo-1543253687-c931c8e01820?w=300&q=70&auto=format&fit=crop";
+        
+        const foto = `<img src="${esc(imagemSrc)}" alt="" loading="lazy" class="absolute inset-0 w-full h-full object-cover">`;
+        
+        return `
+  <article data-id="${esc(p.id)}" class="py-4 border-b border-neutral-100">
+    <div class="flex gap-3">
+      <div class="flex-1 min-w-0">
+        <h3 class="font-semibold leading-snug">${esc(p.nome)}</h3>
+        <p class="text-sm text-neutral-500 mt-1 line-clamp-3">${esc(p.descricao)}</p>
+        <p class="mt-2 font-bold">${brl(p.preco)}</p>
+      </div>
+      <div class="relative shrink-0 w-28 h-28 rounded-xl bg-neutral-200 overflow-visible">
+        <div class="absolute inset-0 rounded-xl overflow-hidden bg-gradient-to-br from-neutral-200 to-neutral-300">${foto}</div>
+        <div data-ctl class="absolute bottom-1.5 right-1.5">${addBtn}</div>
+      </div>
+    </div>
+    <div data-obs class="hidden mt-3">
+      <input data-obs-input type="text" maxlength="200" placeholder="Adicionar observação (ex.: sem cebola)"
+        class="w-full text-sm bg-neutral-50 border-b border-neutral-300 px-1 py-2 placeholder:text-neutral-400 focus:outline-none focus:border-orange-600">
+    </div>
+  </article>`;
+      }
+
+      function syncCard(id) {
+        const el = document.querySelector(`#app [data-id="${CSS.escape(id)}"]`);
+        if (!el) return;
+        const it = cart.get(id);
+        el.querySelector("[data-ctl]").innerHTML = it
+          ? stepper(id, it.qty)
+          : addBtn;
+        const wrap = el.querySelector("[data-obs]");
+        wrap.classList.toggle("hidden", !it);
+        if (!it) wrap.querySelector("input").value = "";
+      }
+
+      function syncBar() {
+        const { n, total } = totais();
+        $("barQtd").textContent = `${n} ${n === 1 ? "item" : "itens"}`;
+        $("barTotal").textContent = brl(total);
+        $("bar").classList.toggle("translate-y-full", n === 0);
+        $("bar").classList.toggle("pointer-events-none", n === 0);
+      }
+
+      function renderApp() {
+        const { restaurante, mesa, cardapio } = data;
+        const numero = String(mesa.numero).padStart(2, "0");
+        document.title = `${restaurante.nome} • Mesa ${numero}`;
+        $("modalMesa").textContent = `${restaurante.nome} • Mesa ${numero}`;
+        cardapio.forEach((c) => c.produtos.forEach((p) => prod.set(p.id, p)));
+
+        $("app").innerHTML = `
+  <header class="relative h-52 bg-neutral-800">
+    <img src="${CAPA}" alt="" class="absolute inset-0 w-full h-full object-cover">
+    <div class="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/40 to-transparent"></div>
+    <div class="absolute bottom-0 inset-x-0 p-5 text-white">
+      <span class="inline-flex items-center gap-1.5 text-xs font-medium bg-white/15 backdrop-blur px-2.5 py-1 rounded-full">
+        <span class="w-1.5 h-1.5 rounded-full bg-orange-500"></span>Mesa ${numero}
+      </span>
+      <h1 class="mt-2 text-3xl font-extrabold leading-tight">${esc(restaurante.nome)}</h1>
+    </div>
+  </header>
+  <section id="track" aria-live="polite" class="hidden px-4 pt-4 space-y-3"></section>
+  <nav class="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-neutral-200">
+    <div id="chips" class="flex gap-2 overflow-x-auto no-scrollbar px-4 py-3">
+      ${cardapio.map((c, i) => `<button data-action="cat" data-i="${i}" class="chip shrink-0 px-4 py-2 rounded-full text-sm font-semibold transition-colors">${esc(c.categoria)}</button>`).join("")}
+    </div>
+  </nav>
+  <main class="px-4">
+    ${cardapio
+      .map(
+        (c, i) => `
+      <section id="cat-${i}" class="pt-6 scroll-mt-16">
+        <h2 class="text-xl font-extrabold">${esc(c.categoria)}</h2>
+        ${c.produtos.map(cardHTML).join("")}
+      </section>`,
+      )
+      .join("")}
+  </main>`;
+
+        setActive(0);
+        const io = new IntersectionObserver(
+          (es) => {
+            es.forEach(
+              (e) => e.isIntersecting && setActive(+e.target.id.slice(4)),
+            );
+          },
+          { rootMargin: "-110px 0px -70% 0px" },
+        );
+        cardapio.forEach((_, i) => io.observe($(`cat-${i}`)));
+      }
+
+      let ativo = -1;
+      function setActive(i) {
+        if (i === ativo) return;
+        ativo = i;
+        const chips = document.querySelectorAll(".chip");
+        chips.forEach((c, j) => {
+          const on = j === i;
+          c.classList.toggle("bg-neutral-900", on);
+          c.classList.toggle("text-white", on);
+          c.classList.toggle("bg-neutral-100", !on);
+          c.classList.toggle("text-neutral-700", !on);
+        });
+        chips[i]?.scrollIntoView({
+          inline: "center",
+          block: "nearest",
+          behavior: "smooth",
+        });
+      }
+
+      /* ========= Modal ========= */
+      function renderModal() {
+        $("modalItens").innerHTML = [...cart]
+          .map(([id, it]) => {
+            const p = prod.get(id);
+            return `<li data-id="${esc(id)}" class="py-4 flex gap-3 border-b border-neutral-100">
+      <div class="flex-1 min-w-0">
+        <p class="font-semibold">${esc(p.nome)}</p>
+        <p class="text-sm text-neutral-500">${brl(p.preco)} cada</p>
+        ${it.obs ? `<p class="mt-1 text-sm text-neutral-700 bg-neutral-100 rounded-lg px-2.5 py-1.5">${esc(it.obs)}</p>` : ""}
+      </div>
+      <div class="flex flex-col items-end justify-between gap-2">
+        <span class="font-bold">${brl(p.preco * it.qty)}</span>${stepper(id, it.qty)}
+      </div></li>`;
+          })
+          .join("");
+        $("modalTotal").textContent = brl(totais().total);
+      }
+
+      function abrirModal() {
+        $("erroEnvio").classList.add("hidden");
+        renderModal();
+        $("modal").classList.remove("hidden");
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() =>
+            $("modal").classList.remove("translate-y-full"),
+          ),
+        );
+        document.body.classList.add("overflow-hidden");
+      }
+      function fecharModal() {
+        $("modal").classList.add("translate-y-full");
+        document.body.classList.remove("overflow-hidden");
+        setTimeout(() => $("modal").classList.add("hidden"), 300);
+      }
+
+      async function enviar() {
+        const btn = $("confirmBtn");
+        btn.disabled = true;
+        btn.textContent = "Enviando pedido…";
+        $("erroEnvio").classList.add("hidden");
+        try {
+          const payload = {
+            sessaoId: data.sessaoId,
+            itens: [...cart].map(([produtoId, it]) => ({
+              produtoId,
+              quantidade: it.qty,
+              ...(it.obs.trim() && { observacao: it.obs.trim() }),
+            })),
+          };
+          const res = await apiPostPedido(payload);
+          rastrear(res.pedidoId, "recebido"); // passa a acompanhar este pedido
+          $("okInfo").textContent =
+            `Pedido #${codigo(res.pedidoId)} • Mesa ${String(data.mesa.numero).padStart(2, "0")} • ${brl(res.total)}`;
+          cart.clear();
+          prod.forEach((_, id) => syncCard(id));
+          syncBar();
+          fecharModal();
+          $("ok").classList.remove("hidden");
+          $("ok").classList.add("flex");
+        } catch (e) {
+          if (e.codigo === "SESSAO_ENCERRADA") {
+            mostrarEncerrada();
+            return;
+          }
+          $("erroEnvio").textContent = `${e.message}. Tente novamente.`;
+          $("erroEnvio").classList.remove("hidden");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Confirmar e Enviar Pedido";
+        }
+      }
+
+      /* ========= Eventos (delegação) ========= */
+      document.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-action]");
+        if (!b) return;
+        const id = b.closest("[data-id]")?.dataset.id;
+        switch (b.dataset.action) {
+          case "add":
+          case "inc":
+            changeQty(id, 1);
+            break;
+          case "dec":
+            changeQty(id, -1);
+            break;
+          case "cat":
+            setActive(+b.dataset.i);
+            $(`cat-${b.dataset.i}`).scrollIntoView();
+            break;
+          case "abrir":
+            abrirModal();
+            break;
+          case "fechar":
+            fecharModal();
+            break;
+          case "enviar":
+            enviar();
+            break;
+          case "novo":
+            $("ok").classList.add("hidden");
+            $("ok").classList.remove("flex");
+            scrollTo({ top: 0 });
+            break;
+        }
+      });
+
+      document.addEventListener("input", (e) => {
+        if (!e.target.matches("[data-obs-input]")) return;
+        const it = cart.get(e.target.closest("[data-id]").dataset.id);
+        if (it) it.obs = e.target.value;
+      });
+
+      /* ========= Acompanhamento do pedido em tempo real ========= */
+      const ETAPAS = [
+        { k: "recebido", txt: "Recebido", ico: '<path d="M5 13l4 4L19 7"/>' },
+        {
+          k: "em_preparo",
+          txt: "Em preparo",
+          ico: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+        },
+        {
+          k: "pronto",
+          txt: "Pronto",
+          ico: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+        },
+      ];
+      const MSG = {
+        recebido: "Seu pedido chegou na cozinha.",
+        em_preparo: "Estamos preparando o seu pedido.",
+        pronto: "Pronto! Já está saindo para a sua mesa.",
+      };
+      const rastreio = new Map(); // pedidoId -> status
+      const codigo = (id) => String(id).slice(-4).toUpperCase();
+
+      function rastrear(id, status) {
+        const antes = rastreio.get(id);
+        if (antes === status) return;
+        rastreio.set(id, status);
+        if (antes) navigator.vibrate?.(status === "pronto" ? [80, 60, 80] : 40);
+        if (status === "entregue" || status === "cancelado") {
+          setTimeout(() => {
+            rastreio.delete(id);
+            renderTrack();
+          }, 12000);
+        }
+        renderTrack();
+      }
+
+      function trackCard(id, st) {
+        const cod = codigo(id);
+        if (st === "entregue" || st === "cancelado") {
+          return `<div class="rounded-2xl bg-neutral-900 text-white px-4 py-3 text-sm"><span class="font-bold">Pedido #${cod}</span> ${st === "entregue" ? "entregue. Bom apetite!" : "foi cancelado. Chame um atendente."}</div>`;
+        }
+        const cur = Math.max(
+          0,
+          ETAPAS.findIndex((e) => e.k === st),
+        );
+        const fill = ["w-0", "w-1/2", "w-full"][cur];
+        const passos = ETAPAS.map((e, i) => {
+          const circ =
+            i > cur
+              ? "bg-neutral-700 text-neutral-400"
+              : i < cur
+                ? "bg-orange-600 text-white"
+                : cur === 2
+                  ? "bg-green-500 text-white ring-4 ring-green-500/30"
+                  : "bg-orange-600 text-white ring-4 ring-orange-500/30";
+          return `<div class="relative z-10 flex-1 flex flex-col items-center gap-1.5">
+      <span class="w-9 h-9 rounded-full flex items-center justify-center transition-colors duration-500 ${circ}">
+        <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${e.ico}</svg>
+      </span>
+      <span class="text-xs font-semibold ${i === cur ? "text-white" : "text-neutral-500"}">${e.txt}</span>
+    </div>`;
+        }).join("");
+        return `<div class="rounded-2xl bg-neutral-900 text-white p-4">
+    <div class="flex items-center justify-between">
+      <p class="font-bold">Pedido #${cod}</p>
+      <p class="text-xs text-neutral-400">Acompanhe em tempo real</p>
+    </div>
+    <div class="relative mt-4 flex">
+      <div class="absolute top-4 left-[16.67%] right-[16.67%] h-1 rounded bg-neutral-700">
+        <div class="h-full rounded bg-orange-500 transition-all duration-700 ${fill}"></div>
+      </div>
+      ${passos}
+    </div>
+    <p class="mt-3 text-sm text-neutral-300">${MSG[st] || ""}</p>
+  </div>`;
+      }
+
+      function renderTrack() {
+        const el = $("track");
+        if (!el) return;
+        el.classList.toggle("hidden", rastreio.size === 0);
+        el.innerHTML = [...rastreio]
+          .map(([id, st]) => trackCard(id, st))
+          .join("");
+      }
+
+      // A comanda foi fechada pelo caixa: limpa tudo e mostra a tela de despedida
+      function mostrarEncerrada() {
+        rastreio.clear();
+        renderTrack();
+        cart.clear();
+        prod.forEach((_, id) => syncCard(id));
+        syncBar();
+        fecharModal();
+        $("ok").classList.add("hidden");
+        $("ok").classList.remove("flex");
+        $("fim").classList.remove("hidden");
+        $("fim").classList.add("flex");
+        document.body.classList.add("overflow-hidden"); // depois do fecharModal, que libera a rolagem
+        socket?.disconnect();
+      }
+
+      // Conexão pública (sem token): entra na sala da COMANDA e escuta o status dos pedidos
+      let socket = null;
+      function conectarSocket(nfcId) {
+        if (USAR_MOCK || typeof io === "undefined") return;
+        socket = io(); // mesmo domínio do site
+        socket.on("connect", () => {
+          // roda na 1ª conexão e em toda reconexão (o celular dormiu, o Wi-Fi caiu...)
+          socket.emit(
+            "sessao:entrar",
+            { nfcId, sessaoId: data.sessaoId },
+            (r) => {
+              if (!r?.ok) return;
+              if (r.encerrada) return mostrarEncerrada(); // o caixa já fechou esta comanda
+              const ativos = new Map(r.pedidos.map((p) => [p.id, p.status]));
+              for (const [id, st] of rastreio) {
+                if (!ativos.has(id) && st !== "entregue" && st !== "cancelado")
+                  rastreio.delete(id);
+              }
+              ativos.forEach((st, id) => rastrear(id, st));
+              renderTrack();
+            },
+          );
+        });
+        socket.on("status:atualizado", ({ pedidoId, status }) =>
+          rastrear(pedidoId, status),
+        );
+        socket.on("sessao:encerrada", () => mostrarEncerrada());
+      }
+
+      /* ========= Inicialização ========= */
+      (async () => {
+        // A tag NFC abre /m/<uuid>; pegamos o UUID da URL
+        const nfcId = location.pathname.split("/").filter(Boolean).pop() || "";
+        try {
+          data = await apiGetMesa(nfcId);
+          renderApp();
+          conectarSocket(nfcId);
+        } catch (e) {
+          $("app").innerHTML =
+            `<div class="p-10 text-center"><p class="text-lg font-bold">Mesa não encontrada</p>
+      <p class="mt-2 text-neutral-500">${esc(e.message)}. Aproxime o celular da tag novamente.</p></div>`;
+        }
+      })();
+    </script>
+  </body>
+</html>

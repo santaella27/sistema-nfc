@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <title>Painel da Cozinha</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ["Figtree", "system-ui", "sans-serif"] },
+          },
+        },
+      };
+    </script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+      .no-scrollbar::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      .no-scrollbar::-webkit-scrollbar-thumb {
+        background: #404040;
+        border-radius: 9px;
+      }
+      @keyframes flash {
+        0% {
+          box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.75);
+        }
+        100% {
+          box-shadow: 0 0 0 16px rgba(249, 115, 22, 0);
+        }
+      }
+      .novo {
+        animation: flash 1.1s ease-out 2;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-neutral-950 text-neutral-100 font-sans antialiased">
+    <!-- Login -->
+    <section
+      id="login"
+      class="min-h-screen flex items-center justify-center p-6"
+    >
+      <form
+        id="loginForm"
+        class="w-full max-w-sm bg-neutral-900 ring-1 ring-white/10 rounded-3xl p-8"
+      >
+        <h1 class="text-2xl font-extrabold">Painel da Cozinha</h1>
+        <p class="text-sm text-neutral-400 mt-1">
+          Entre para receber os pedidos em tempo real.
+        </p>
+        <label class="block mt-6 text-sm text-neutral-400"
+          >E-mail
+          <input
+            id="email"
+            type="email"
+            required
+            autocomplete="username"
+            class="mt-1 w-full rounded-xl bg-neutral-800 px-4 py-3 text-neutral-100 outline-none focus:ring-2 focus:ring-orange-500"
+        /></label>
+        <label class="block mt-4 text-sm text-neutral-400"
+          >Senha
+          <input
+            id="senha"
+            type="password"
+            required
+            autocomplete="current-password"
+            class="mt-1 w-full rounded-xl bg-neutral-800 px-4 py-3 text-neutral-100 outline-none focus:ring-2 focus:ring-orange-500"
+        /></label>
+        <p id="loginErro" class="hidden mt-3 text-sm text-red-400"></p>
+        <button
+          id="loginBtn"
+          class="mt-6 w-full rounded-xl bg-orange-600 hover:bg-orange-500 py-3 font-bold transition"
+        >
+          Entrar
+        </button>
+        <p id="demoNota" class="mt-4 text-xs text-neutral-500 text-center">
+          Modo demonstração: qualquer e-mail e senha funcionam.
+        </p>
+      </form>
+    </section>
+
+    <!-- Painel -->
+    <div id="painel" class="hidden h-screen flex-col">
+      <header
+        class="h-14 shrink-0 flex items-center justify-between px-4 bg-neutral-900 border-b border-white/10"
+      >
+        <h1 id="nomeRest" class="font-extrabold text-lg truncate"></h1>
+        <div class="flex items-center gap-2 sm:gap-3 text-sm">
+          <span class="flex items-center gap-2 text-neutral-300"
+            ><span id="dot" class="w-2.5 h-2.5 rounded-full bg-red-500"></span
+            ><span id="conTxt">Desconectado</span></span
+          >
+          <button
+            id="somBtn"
+            data-action="som"
+            class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300"
+          >
+            Ativar som
+          </button>
+          <button
+            id="simBtn"
+            data-action="simular"
+            class="hidden px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300"
+          >
+            Simular pedido
+          </button>
+          <button
+            data-action="sair"
+            class="px-3 py-1.5 rounded-lg text-neutral-400 hover:text-white"
+          >
+            Sair
+          </button>
+        </div>
+      </header>
+      <section id="mesasBar" class="hidden shrink-0 border-b border-white/10">
+        <p class="px-4 pt-3 text-xs font-semibold text-neutral-500">
+          Mesas em atendimento
+        </p>
+        <div
+          id="mesasLista"
+          class="no-scrollbar flex gap-3 overflow-x-auto px-4 py-3"
+        ></div>
+      </section>
+      <main
+        id="colunas"
+        class="flex-1 min-h-0 overflow-y-auto md:overflow-hidden grid grid-cols-1 md:grid-cols-3 gap-4 p-4"
+      ></main>
+    </div>
+
+    <div
+      id="toast"
+      class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 hidden px-4 py-3 rounded-xl bg-red-600 text-white text-sm font-semibold shadow-xl"
+    ></div>
+
+    <script>
+      /* ========= Configuração ========= */
+      const USAR_MOCK = false; // true = dados fictícios (sem backend)
+      const API_BASE = "/api"; // login em /api/auth/login, pedidos em /api/pedidos
+      const SOCKET_URL = undefined; // undefined = mesmo domínio; ou 'https://seu-servidor.com'
+
+      /* ========= Utilitários ========= */
+      const $ = (id) => document.getElementById(id);
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const brl = (c) =>
+        new Intl.NumberFormat("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+        }).format(c / 100);
+      const esc = (s) =>
+        String(s ?? "").replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
+      const norm = (p) => ({
+        ...p,
+        id: p.id || p._id,
+        criadoEm: p.criadoEm || p.createdAt,
+      });
+      function toast(msg) {
+        const t = $("toast");
+        t.textContent = msg;
+        t.classList.remove("hidden");
+        clearTimeout(toast.t);
+        toast.t = setTimeout(() => t.classList.add("hidden"), 3500);
+      }
+
+      /* ========= Mock ========= */
+      const MENU = [
+        ["Batata Frita Rústica", 3290],
+        ["Espetinho Misto (4 un.)", 3890],
+        ["Picanha na Chapa", 6890],
+        ["Hambúrguer Artesanal", 3590],
+        ["Caipirinha de Limão", 2290],
+        ["Suco Natural", 1290],
+        ["Petit Gâteau", 2490],
+      ];
+      const OBS = [
+        "Sem cebola",
+        "Ponto bem passado",
+        "Sem gelo",
+        "Molho à parte",
+        "Alérgico a amendoim",
+      ];
+      const rnd = (n) => Math.floor(Math.random() * n);
+      function pedidoMock(minAtras = 0, status = "recebido") {
+        const itens = Array.from({ length: 1 + rnd(3) }, () => {
+          const [nome, precoUnitario] = MENU[rnd(MENU.length)];
+          return {
+            produto: crypto.randomUUID(),
+            nome,
+            precoUnitario,
+            quantidade: 1 + rnd(2),
+            observacao: Math.random() < 0.5 ? OBS[rnd(OBS.length)] : undefined,
+          };
+        });
+        const numero = 1 + rnd(20);
+        return {
+          id: crypto.randomUUID(),
+          sessaoId: `sessao-${numero}`,
+          mesa: { numero },
+          itens,
+          status,
+          total: itens.reduce((s, i) => s + i.precoUnitario * i.quantidade, 0),
+          criadoEm: new Date(Date.now() - minAtras * 60000).toISOString(),
+        };
+      }
+      function socketMock() {
+        // imita a interface mínima do socket.io-client
+        const h = {};
+        const s = {
+          on: (e, f) => ((h[e] ||= []).push(f), s),
+          emit: (e, d) => (h[e] || []).forEach((f) => f(d)),
+          disconnect() {
+            s.emit("disconnect");
+          },
+        };
+        setTimeout(() => s.emit("connect"), 600);
+        return s;
+      }
+
+      /* ========= API ========= */
+      let sessao = null; // { token, usuario, restauranteNome }
+
+      async function api(path, opts = {}) {
+        const r = await fetch(API_BASE + path, {
+          ...opts,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessao.token}`,
+          },
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 401) {
+          sair("Sessão expirada. Entre novamente.");
+          throw new Error("Sessão expirada");
+        }
+        if (!r.ok) throw new Error(d.erro || "Erro na requisição");
+        return d;
+      }
+
+      async function apiLogin(email, senha) {
+        if (USAR_MOCK) {
+          await sleep(500);
+          return {
+            token: "mock.jwt.token",
+            usuario: {
+              id: "u1",
+              nome: "Dono",
+              papel: "dono",
+              restaurante: "r1",
+            },
+            restaurante: { nome: "Cantina Brasa & Lenha" },
+          };
+        }
+        const r = await fetch(`${API_BASE}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, senha }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.erro || "Falha no login");
+        return d;
+      }
+
+      // Contrato esperado: GET /api/pedidos?status=recebido,em_preparo,pronto,entregue -> array no mesmo formato do evento pedido:novo
+      async function apiListar() {
+        if (USAR_MOCK) {
+          await sleep(300);
+          return [
+            pedidoMock(18, "recebido"),
+            pedidoMock(9, "em_preparo"),
+            pedidoMock(4, "pronto"),
+          ];
+        }
+        return api("/pedidos?status=recebido,em_preparo,pronto,entregue");
+      }
+
+      // Contrato esperado: PATCH /api/pedidos/:id/status  body { status }
+      async function apiStatus(id, status) {
+        if (USAR_MOCK) {
+          await sleep(400);
+          return { id, status };
+        }
+        return api(`/pedidos/${encodeURIComponent(id)}/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status }),
+        });
+      }
+
+      // Contrato: PATCH /api/sessoes/:id/fechar -> fecha a comanda e libera a mesa para o próximo cliente
+      async function apiFecharSessao(id) {
+        if (USAR_MOCK) {
+          await sleep(400);
+          return { sessaoId: id, status: "fechada" };
+        }
+        return api(`/sessoes/${encodeURIComponent(id)}/fechar`, {
+          method: "PATCH",
+        });
+      }
+
+      /* ========= Som (Web Audio API) ========= */
+      let audioCtx = null;
+      function prepararAudio() {
+        audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+        audioCtx.resume().then(atualizarSomBtn);
+      }
+      function atualizarSomBtn() {
+        const on = audioCtx && audioCtx.state === "running";
+        $("somBtn").textContent = on ? "Som ativo" : "Ativar som";
+        $("somBtn").classList.toggle("text-green-400", !!on);
+      }
+      function bip() {
+        if (!audioCtx || audioCtx.state !== "running") return;
+        const t = audioCtx.currentTime;
+        [
+          [880, 0],
+          [1175, 0.2],
+          [880, 0.45],
+          [1175, 0.65],
+        ].forEach(([f, d]) => {
+          const o = audioCtx.createOscillator(),
+            g = audioCtx.createGain();
+          o.type = "sine";
+          o.frequency.value = f;
+          o.connect(g);
+          g.connect(audioCtx.destination);
+          g.gain.setValueAtTime(0, t + d);
+          g.gain.linearRampToValueAtTime(0.35, t + d + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.001, t + d + 0.18);
+          o.start(t + d);
+          o.stop(t + d + 0.2);
+        });
+      }
+
+      /* ========= Estado e renderização ========= */
+      const pedidos = new Map();
+      const pendentes = new Set();
+      const fechadas = new Set(); // comandas já encerradas
+      const pendentesSessao = new Set(); // comandas sendo fechadas agora
+      let confirmando = null,
+        confirmTimer = null; // 1º clique pede confirmação
+      const COLS = [
+        {
+          id: "recebido",
+          titulo: "Recebidos",
+          cor: "bg-orange-500",
+          st: ["recebido"],
+        },
+        {
+          id: "em_preparo",
+          titulo: "Em Preparo",
+          cor: "bg-yellow-400",
+          st: ["em_preparo"],
+        },
+        {
+          id: "pronto",
+          titulo: "Prontos / Entregues",
+          cor: "bg-green-500",
+          st: ["pronto", "entregue"],
+        },
+      ];
+      const ACOES = {
+        recebido: {
+          para: "em_preparo",
+          txt: "Iniciar Preparo",
+          cls: "bg-orange-600 hover:bg-orange-500",
+        },
+        em_preparo: {
+          para: "pronto",
+          txt: "Pronto para Entrega",
+          cls: "bg-green-600 hover:bg-green-500",
+        },
+        pronto: {
+          para: "entregue",
+          txt: "Marcar como Entregue",
+          cls: "bg-neutral-700 hover:bg-neutral-600",
+        },
+      };
+
+      // >>> NOVO (1/5): status em que o botão "Cancelar" aparece (o pedido ainda não saiu da cozinha)
+      const CANCELAVEIS = ["recebido", "em_preparo"];
+
+      function cardHTML(p) {
+        const min = Math.max(
+          0,
+          Math.floor((Date.now() - new Date(p.criadoEm)) / 60000),
+        );
+        const hora = new Date(p.criadoEm).toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        const atrasado =
+          min >= 15 && (p.status === "recebido" || p.status === "em_preparo");
+        const acao = ACOES[p.status];
+        // >>> NOVO (2/5): botão "Cancelar" discreto (só o ícone X, em vermelho) e visível apenas em
+        // "recebido" e "em_preparo". Fica ao lado do botão principal, sem competir com ele.
+        const btnCancelar = CANCELAVEIS.includes(p.status)
+          ? `<button data-action="cancelar" ${pendentes.has(p.id) ? "disabled" : ""} title="Cancelar pedido" aria-label="Cancelar pedido" class="w-10 h-10 flex items-center justify-center rounded-xl text-red-400 ring-1 ring-red-500/30 hover:bg-red-500/15 hover:text-red-300 transition active:scale-95 disabled:opacity-40"><svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`
+          : "";
+        return `
+  <article data-id="${esc(p.id)}" class="${p._novo ? "novo " : ""}rounded-2xl bg-neutral-900 ring-1 ring-white/10 p-4 ${p.status === "entregue" ? "opacity-50" : ""}">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <p class="text-3xl font-extrabold leading-none">Mesa ${String(p.mesa?.numero ?? "?").padStart(2, "0")}</p>
+        ${p.nomeCliente ? `<p class="text-sm text-neutral-400 mt-1">${esc(p.nomeCliente)}</p>` : ""}
+      </div>
+      <div class="text-right">
+        <p class="font-bold tabular-nums">${hora}</p>
+        <p class="text-xs ${atrasado ? "text-red-400 font-semibold" : "text-neutral-500"}">há ${min} min</p>
+      </div>
+    </div>
+    <ul class="mt-4 space-y-2.5">
+      ${p.itens
+        .map(
+          (i) => `
+        <li class="flex gap-2.5">
+          <span class="font-extrabold text-orange-400 tabular-nums">${i.quantidade}×</span>
+          <div class="min-w-0">
+            <p class="font-semibold leading-snug">${esc(i.nome)}</p>
+            ${i.observacao ? `<p class="text-sm text-red-400 italic">⚠ ${esc(i.observacao)}</p>` : ""}
+          </div>
+        </li>`,
+        )
+        .join("")}
+    </ul>
+    ${p.observacaoGeral ? `<p class="mt-3 text-sm text-red-300 italic bg-red-500/10 rounded-lg px-3 py-2">${esc(p.observacaoGeral)}</p>` : ""}
+    <div class="mt-4 pt-3 border-t border-white/10 flex items-center justify-between gap-3">
+      <span class="text-lg font-bold">${brl(p.total)}</span>
+      <div class="flex items-center gap-2">
+        ${btnCancelar}
+        ${
+          acao
+            ? `<button data-action="avancar" ${pendentes.has(p.id) ? "disabled" : ""} class="${acao.cls} px-4 py-2.5 rounded-xl font-bold text-white transition active:scale-95 disabled:opacity-50">${pendentes.has(p.id) ? "Atualizando…" : acao.txt}</button>`
+            : '<span class="text-sm text-neutral-500">Entregue</span>'
+        }
+      </div>
+    </div>
+  </article>`;
+      }
+
+      function render() {
+        const todos = [...pedidos.values()];
+        for (const c of COLS) {
+          let lista = todos.filter((p) => c.st.includes(p.status));
+          lista =
+            c.id === "pronto"
+              ? lista
+                  .sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm))
+                  .slice(0, 12)
+              : lista.sort(
+                  (a, b) => new Date(a.criadoEm) - new Date(b.criadoEm),
+                ); // mais antigo primeiro
+          $("cnt-" + c.id).textContent = todos.filter((p) =>
+            c.st.includes(p.status),
+          ).length;
+          $("lista-" + c.id).innerHTML =
+            lista.map(cardHTML).join("") ||
+            '<p class="text-center text-sm text-neutral-600 py-10">Nenhum pedido</p>';
+        }
+        renderMesas();
+        const novos = todos.filter((p) => p.status === "recebido").length;
+        document.title = (novos ? `(${novos}) ` : "") + "Painel da Cozinha";
+      }
+
+      /* ========= Mesas em atendimento (comandas abertas) ========= */
+      // Agrupa os pedidos por comanda e ignora as já encerradas
+      function sessoesAbertas() {
+        const mapa = new Map();
+        for (const p of pedidos.values()) {
+          if (!p.sessaoId || fechadas.has(p.sessaoId)) continue;
+          const s = mapa.get(p.sessaoId) || {
+            id: p.sessaoId,
+            mesa: p.mesa?.numero,
+            total: 0,
+            qtd: 0,
+            cozinha: 0,
+          };
+          s.total += p.total;
+          s.qtd += 1;
+          if (p.status === "recebido" || p.status === "em_preparo")
+            s.cozinha += 1;
+          mapa.set(p.sessaoId, s);
+        }
+        return [...mapa.values()].sort((a, b) => a.mesa - b.mesa);
+      }
+
+      function mesaChipHTML(s) {
+        const conf = confirmando === s.id,
+          fechando = pendentesSessao.has(s.id);
+        return `
+  <div data-sessao="${esc(s.id)}" class="shrink-0 flex items-center gap-4 rounded-2xl bg-neutral-900 ring-1 ring-white/10 pl-4 pr-2 py-2">
+    <div>
+      <p class="text-lg font-extrabold leading-none">Mesa ${String(s.mesa ?? "?").padStart(2, "0")}</p>
+      <p class="mt-1 text-xs text-neutral-400">${s.qtd} ${s.qtd === 1 ? "pedido" : "pedidos"} • ${brl(s.total)}${s.cozinha ? ` • <span class="text-yellow-400">${s.cozinha} na cozinha</span>` : ""}</p>
+    </div>
+    <button data-action="fechar-conta" ${fechando ? "disabled" : ""} class="${conf ? "bg-red-700 ring-2 ring-red-300" : "bg-red-600 hover:bg-red-500"} px-4 py-2.5 rounded-xl text-sm font-bold text-white transition active:scale-95 disabled:opacity-50">${fechando ? "Fechando…" : conf ? "Confirmar fechamento?" : "Fechar Conta / Liberar Mesa"}</button>
+  </div>`;
+      }
+
+      function renderMesas() {
+        const lista = sessoesAbertas();
+        $("mesasBar").classList.toggle("hidden", lista.length === 0);
+        $("mesasLista").innerHTML = lista.map((s) => mesaChipHTML(s)).join("");
+      }
+
+      // 1º clique pede confirmação (some em 4s); 2º clique fecha a conta
+      async function fecharConta(sessaoId) {
+        if (confirmando !== sessaoId) {
+          confirmando = sessaoId;
+          renderMesas();
+          clearTimeout(confirmTimer);
+          confirmTimer = setTimeout(() => {
+            confirmando = null;
+            renderMesas();
+          }, 4000);
+          return;
+        }
+        clearTimeout(confirmTimer);
+        confirmando = null;
+        pendentesSessao.add(sessaoId);
+        renderMesas();
+        try {
+          await apiFecharSessao(sessaoId);
+          fechadas.add(sessaoId); // a mesa sai da lista; o próximo cliente começa do zero
+        } catch (e) {
+          toast(e.message);
+        }
+        pendentesSessao.delete(sessaoId);
+        render();
+      }
+
+      function montarColunas() {
+        $("colunas").innerHTML = COLS.map(
+          (c) => `
+    <section class="flex flex-col min-h-0 rounded-3xl bg-neutral-900/40 ring-1 ring-white/5">
+      <h2 class="shrink-0 flex items-center gap-2.5 px-5 py-4 font-bold">
+        <span class="w-2.5 h-2.5 rounded-full ${c.cor}"></span>${c.titulo}
+        <span id="cnt-${c.id}" class="ml-auto text-sm font-semibold text-neutral-400 bg-white/5 px-2.5 py-0.5 rounded-full">0</span>
+      </h2>
+      <div id="lista-${c.id}" class="no-scrollbar flex-1 min-h-0 md:overflow-y-auto px-3 pb-3 space-y-3"></div>
+    </section>`,
+        ).join("");
+      }
+
+      /* ========= Socket.io ========= */
+      let socket = null;
+      function setConexao(on) {
+        $("dot").className =
+          `w-2.5 h-2.5 rounded-full ${on ? "bg-green-500" : "bg-red-500"}`;
+        $("conTxt").textContent = on ? "Conectado" : "Desconectado";
+      }
+
+      async function carregarPedidos() {
+        try {
+          const lista = (await apiListar())
+            .map(norm)
+            .filter((p) => p.status !== "cancelado");
+          pedidos.clear();
+          fechadas.clear();
+          lista.forEach((p) => {
+            pedidos.set(p.id, p);
+            if (p.sessaoStatus === "fechada") fechadas.add(p.sessaoId);
+          });
+          render();
+        } catch (e) {
+          toast(e.message);
+        }
+      }
+
+      function conectar() {
+        socket = USAR_MOCK
+          ? socketMock()
+          : io(SOCKET_URL, { auth: { token: sessao.token } });
+        socket.on("connect", () => {
+          setConexao(true);
+          carregarPedidos();
+        }); // ressincroniza a cada (re)conexão
+        socket.on("disconnect", () => setConexao(false));
+        socket.on("connect_error", (err) => {
+          setConexao(false);
+          if (/token/i.test(err.message))
+            sair("Sessão inválida. Entre novamente.");
+        });
+        socket.on("pedido:novo", (raw) => {
+          const p = norm(raw);
+          if (pedidos.has(p.id)) return;
+          p._novo = true;
+          setTimeout(() => delete p._novo, 2600);
+          pedidos.set(p.id, p);
+          render();
+          bip();
+        });
+        // Outra tela (ou esta) moveu um pedido de coluna: sincroniza sem recarregar.
+        // >>> NOVO (3/5): se o status que chegou for "cancelado" (cancelado em QUALQUER tela),
+        // o card é removido do Kanban logo abaixo (pedidos.delete) e as telas ficam sincronizadas.
+        socket.on("pedido:atualizado", (raw) => {
+          const p = norm(raw);
+          if (p.status === "cancelado") pedidos.delete(p.id);
+          else pedidos.set(p.id, { ...pedidos.get(p.id), ...p });
+          render();
+        });
+        // O caixa (esta tela ou outra) fechou uma comanda: tira a mesa da lista
+        socket.on("sessao:fechada", ({ sessaoId }) => {
+          fechadas.add(sessaoId);
+          if (confirmando === sessaoId) confirmando = null;
+          render();
+        });
+      }
+
+      /* ========= Ações ========= */
+      async function avancar(id) {
+        const p = pedidos.get(id),
+          acao = p && ACOES[p.status];
+        if (!acao || pendentes.has(id)) return;
+        pendentes.add(id);
+        render();
+        try {
+          await apiStatus(id, acao.para);
+          p.status = acao.para; // só move o card depois do sucesso da API
+        } catch (e) {
+          toast(e.message);
+        }
+        pendentes.delete(id);
+        render();
+      }
+
+      // >>> NOVO (4/5): cancelar pedido (só "recebido" / "em_preparo")
+      async function cancelar(id) {
+        const p = pedidos.get(id);
+        if (!p || !CANCELAVEIS.includes(p.status) || pendentes.has(id)) return;
+
+        // Confirmação simples para evitar clique acidental na correria (mostra a mesa para conferir)
+        const mesa = String(p.mesa?.numero ?? "?").padStart(2, "0");
+        if (
+          !window.confirm(
+            `Tem certeza que deseja cancelar este pedido?\n\nMesa ${mesa} • ${brl(p.total)}`,
+          )
+        )
+          return;
+
+        pendentes.add(id);
+        render(); // desabilita os botões do card enquanto a API responde
+        try {
+          await apiStatus(id, "cancelado"); // PATCH /api/pedidos/:id/status  { status: 'cancelado' }
+          pedidos.delete(id); // só some do Kanban depois que a API confirmou
+        } catch (e) {
+          toast(`Não foi possível cancelar: ${e.message}`);
+        }
+        pendentes.delete(id);
+        render();
+      }
+
+      function entrar() {
+        $("login").classList.add("hidden");
+        $("painel").classList.remove("hidden");
+        $("painel").classList.add("flex");
+        $("nomeRest").textContent =
+          sessao.restauranteNome || "Painel da Cozinha";
+        $("simBtn").classList.toggle("hidden", !USAR_MOCK);
+        montarColunas();
+        render();
+        atualizarSomBtn();
+        setConexao(false);
+        conectar();
+      }
+
+      function sair(msg) {
+        socket?.disconnect();
+        socket = null;
+        sessao = null;
+        sessionStorage.removeItem("painel");
+        pedidos.clear();
+        fechadas.clear();
+        confirmando = null;
+        $("painel").classList.add("hidden");
+        $("painel").classList.remove("flex");
+        $("login").classList.remove("hidden");
+        if (typeof msg === "string") {
+          $("loginErro").textContent = msg;
+          $("loginErro").classList.remove("hidden");
+        }
+      }
+
+      document.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-action]");
+        if (!b) return;
+        const a = b.dataset.action;
+        if (a === "avancar") avancar(b.closest("[data-id]").dataset.id);
+        else if (a === "cancelar")
+          cancelar(b.closest("[data-id]").dataset.id); // >>> NOVO (5/5)
+        else if (a === "sair") sair();
+        else if (a === "fechar-conta")
+          fecharConta(b.closest("[data-sessao]").dataset.sessao);
+        else if (a === "som") {
+          prepararAudio();
+          setTimeout(bip, 100);
+        } else if (a === "simular") socket.emit("pedido:novo", pedidoMock()); // só existe no modo mock
+      });
+
+      $("loginForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        prepararAudio(); // o clique do login libera o áudio no navegador
+        const btn = $("loginBtn");
+        btn.disabled = true;
+        btn.textContent = "Entrando…";
+        $("loginErro").classList.add("hidden");
+        try {
+          const d = await apiLogin($("email").value, $("senha").value);
+          sessao = {
+            token: d.token,
+            usuario: d.usuario,
+            restauranteNome: d.restaurante?.nome,
+          };
+          sessionStorage.setItem("painel", JSON.stringify(sessao));
+          entrar();
+          if (USAR_MOCK)
+            setTimeout(() => socket?.emit("pedido:novo", pedidoMock()), 4000);
+        } catch (err) {
+          $("loginErro").textContent = err.message;
+          $("loginErro").classList.remove("hidden");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Entrar";
+        }
+      });
+
+      /* ========= Inicialização ========= */
+      $("demoNota").classList.toggle("hidden", !USAR_MOCK);
+      setInterval(() => sessao && render(), 30000); // atualiza o "há X min"
+      try {
+        sessao = JSON.parse(sessionStorage.getItem("painel"));
+      } catch {
+        sessao = null;
+      }
+      if (sessao?.token) entrar();
+    </script>
+  </body>
+</html>
