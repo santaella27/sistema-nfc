@@ -41,6 +41,7 @@ app.use(
 );
 app.use(cors({ origin: origensPermitidas() }));
 app.use(express.json({ limit: "50kb" }));
+app.use(express.static(path.join(__dirname)));
 
 // API (JSON)
 app.use("/api/auth", require("./routes/auth"));
