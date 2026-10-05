@@ -68,12 +68,13 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => {
-    server.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
-  })
-  .catch((err) => {
-    console.error("Falha ao conectar no MongoDB:", err);
-    process.exit(1);
-  });
+// Inicia o servidor web imediatamente para o Render detetar a porta
+server.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+  
+  // Tenta ligar à base de dados em segundo plano
+  mongoose
+    .connect(process.env.MONGO_URI)
+    .then(() => console.log("Conectado ao MongoDB com sucesso!"))
+    .catch((err) => console.error("Falha ao conectar no MongoDB:", err));
+});
