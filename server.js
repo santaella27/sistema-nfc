@@ -53,6 +53,7 @@ app.use("/api/auth", require("./routes/auth"));
 app.use("/api/m", require("./routes/mesas"));
 app.use("/api/pedidos", require("./routes/pedidos"));
 app.use("/api/sessoes", require("./routes/sessoes"));
+app.use("/api/relatorios", require("./routes/relatorios"));
 
 // Páginas HTML
 const PAGINAS = {

@@ -128,6 +128,26 @@
           </button>
         </div>
       </header>
+      <nav
+        id="abas"
+        class="hidden shrink-0 flex gap-1 px-4 pt-2 bg-neutral-900/60 border-b border-white/10"
+      >
+        <button
+          data-action="aba"
+          data-aba="pedidos"
+          class="px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2"
+        >
+          Pedidos
+        </button>
+        <button
+          data-action="aba"
+          data-aba="relatorio"
+          class="px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2"
+        >
+          Relatório de vendas
+        </button>
+      </nav>
+      <div id="viewPedidos" class="flex-1 min-h-0 flex flex-col">
       <section id="mesasBar" class="hidden shrink-0 border-b border-white/10">
         <p class="px-4 pt-3 text-xs font-semibold text-neutral-500">
           Mesas em atendimento
@@ -141,6 +161,58 @@
         id="colunas"
         class="flex-1 min-h-0 overflow-y-auto md:overflow-hidden grid grid-cols-1 md:grid-cols-3 gap-4 p-4"
       ></main>
+      </div>
+
+      <!-- Relatório de vendas -->
+      <section
+        id="viewRelatorio"
+        class="hidden flex-1 min-h-0 overflow-y-auto p-4"
+      >
+        <div class="max-w-4xl mx-auto">
+          <div class="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 class="text-xl font-extrabold">Relatório de vendas</h2>
+              <p class="text-sm text-neutral-400">
+                Considera apenas pedidos entregues.
+              </p>
+            </div>
+            <div class="flex items-end gap-2">
+              <label class="text-xs text-neutral-400"
+                >Dia
+                <input
+                  id="relData"
+                  type="date"
+                  class="mt-1 block rounded-xl bg-neutral-800 px-3 py-2 text-sm text-neutral-100 outline-none focus:ring-2 focus:ring-orange-500 [color-scheme:dark]"
+              /></label>
+              <button
+                data-action="relatorio-atualizar"
+                class="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-sm font-semibold text-neutral-200"
+              >
+                Atualizar
+              </button>
+            </div>
+          </div>
+
+          <div id="relCards" class="mt-5 grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
+
+          <h3 class="mt-8 mb-3 font-bold">Produtos mais vendidos</h3>
+          <div
+            class="rounded-2xl bg-neutral-900 ring-1 ring-white/10 overflow-x-auto"
+          >
+            <table class="w-full text-sm">
+              <thead class="text-left text-xs text-neutral-400">
+                <tr class="border-b border-white/10">
+                  <th class="px-4 py-3 w-12">#</th>
+                  <th class="px-4 py-3">Produto</th>
+                  <th class="px-4 py-3 text-right">Qtd.</th>
+                  <th class="px-4 py-3 text-right">Valor gerado</th>
+                </tr>
+              </thead>
+              <tbody id="relTabela"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div
@@ -319,6 +391,31 @@
         return api(`/sessoes/${encodeURIComponent(id)}/fechar`, {
           method: "PATCH",
         });
+      }
+
+      // Contrato: GET /api/relatorios/diario?data=YYYY-MM-DD (data opcional) -> resumo + ranking de produtos
+      async function apiRelatorio(data) {
+        if (USAR_MOCK) {
+          await sleep(300);
+          const produtos = MENU.map(([nome, preco], i) => ({
+            produtoId: String(i),
+            nome,
+            quantidade: 12 - i,
+            valorTotal: (12 - i) * preco,
+          }));
+          const faturamento = produtos.reduce((s, p) => s + p.valorTotal, 0);
+          return {
+            data: data || new Date().toISOString().slice(0, 10),
+            resumo: {
+              faturamento,
+              totalPedidos: 14,
+              ticketMedio: Math.round(faturamento / 14),
+              itensVendidos: produtos.reduce((s, p) => s + p.quantidade, 0),
+            },
+            produtos,
+          };
+        }
+        return api(`/relatorios/diario${data ? `?data=${encodeURIComponent(data)}` : ""}`);
       }
 
       /* ========= Som (Web Audio API) ========= */
@@ -621,6 +718,7 @@
           if (p.status === "cancelado") pedidos.delete(p.id);
           else pedidos.set(p.id, { ...pedidos.get(p.id), ...p });
           render();
+          atualizarRelatorioSeAberto();
         });
         // O caixa (esta tela ou outra) fechou uma comanda: tira a mesa da lista
         socket.on("sessao:fechada", ({ sessaoId }) => {
@@ -628,6 +726,76 @@
           if (confirmando === sessaoId) confirmando = null;
           render();
         });
+      }
+
+      /* ========= Abas e relatório de vendas ========= */
+      let abaAtual = "pedidos";
+      let relTimer = null;
+      let relReq = 0; // ignora respostas antigas se o usuário trocar de dia rapidamente
+
+      const podeVerRelatorio = () =>
+        USAR_MOCK || ["dono", "gerente"].includes(sessao?.usuario?.papel);
+
+      function mostrarAba(aba) {
+        if (aba === "relatorio" && !podeVerRelatorio()) aba = "pedidos";
+        abaAtual = aba;
+        $("viewPedidos").classList.toggle("hidden", aba !== "pedidos");
+        $("viewRelatorio").classList.toggle("hidden", aba !== "relatorio");
+        document.querySelectorAll("[data-aba]").forEach((b) => {
+          const ativa = b.dataset.aba === aba;
+          b.classList.toggle("border-orange-500", ativa);
+          b.classList.toggle("text-white", ativa);
+          b.classList.toggle("border-transparent", !ativa);
+          b.classList.toggle("text-neutral-400", !ativa);
+        });
+        if (aba === "relatorio") carregarRelatorio();
+      }
+
+      function relCard(titulo, valor) {
+        return `<div class="rounded-2xl bg-neutral-900 ring-1 ring-white/10 p-4">
+          <p class="text-xs text-neutral-400">${titulo}</p>
+          <p class="mt-1 text-2xl font-extrabold tabular-nums">${valor}</p>
+        </div>`;
+      }
+
+      function renderRelatorio(r) {
+        const s = r.resumo;
+        $("relCards").innerHTML =
+          relCard("Faturamento total", brl(s.faturamento)) +
+          relCard("Total de pedidos", s.totalPedidos) +
+          relCard("Ticket médio", brl(s.ticketMedio)) +
+          relCard("Itens vendidos", s.itensVendidos);
+        $("relTabela").innerHTML =
+          r.produtos
+            .map(
+              (p, i) => `<tr class="border-b border-white/5 last:border-0">
+          <td class="px-4 py-3 text-neutral-500 tabular-nums">${i + 1}</td>
+          <td class="px-4 py-3 font-semibold">${esc(p.nome)}</td>
+          <td class="px-4 py-3 text-right tabular-nums font-bold text-orange-400">${p.quantidade}</td>
+          <td class="px-4 py-3 text-right tabular-nums">${brl(p.valorTotal)}</td>
+        </tr>`,
+            )
+            .join("") ||
+          '<tr><td colspan="4" class="px-4 py-10 text-center text-neutral-500">Nenhum pedido entregue neste dia</td></tr>';
+      }
+
+      async function carregarRelatorio() {
+        const minha = ++relReq;
+        try {
+          const r = await apiRelatorio($("relData").value || undefined);
+          if (minha !== relReq) return;
+          if (!$("relData").value) $("relData").value = r.data; // 1ª vez: usa o "hoje" do servidor
+          renderRelatorio(r);
+        } catch (e) {
+          if (minha === relReq) toast(`Não foi possível carregar o relatório: ${e.message}`);
+        }
+      }
+
+      // Quando um pedido é entregue/cancelado com o relatório aberto, atualiza os números (com atraso para agrupar eventos)
+      function atualizarRelatorioSeAberto() {
+        if (abaAtual !== "relatorio") return;
+        clearTimeout(relTimer);
+        relTimer = setTimeout(carregarRelatorio, 800);
       }
 
       /* ========= Ações ========= */
@@ -682,6 +850,9 @@
         $("simBtn").classList.toggle("hidden", !USAR_MOCK);
         montarColunas();
         render();
+        $("abas").classList.toggle("hidden", !podeVerRelatorio());
+        $("relData").value = "";
+        mostrarAba("pedidos");
         atualizarSomBtn();
         setConexao(false);
         conectar();
@@ -712,6 +883,8 @@
         else if (a === "cancelar")
           cancelar(b.closest("[data-id]").dataset.id); // >>> NOVO (5/5)
         else if (a === "sair") sair();
+        else if (a === "aba") mostrarAba(b.dataset.aba);
+        else if (a === "relatorio-atualizar") carregarRelatorio();
         else if (a === "fechar-conta")
           fecharConta(b.closest("[data-sessao]").dataset.sessao);
         else if (a === "som") {
@@ -719,6 +892,8 @@
           setTimeout(bip, 100);
         } else if (a === "simular") socket.emit("pedido:novo", pedidoMock()); // só existe no modo mock
       });
+
+      $("relData").addEventListener("change", carregarRelatorio);
 
       $("loginForm").addEventListener("submit", async (e) => {
         e.preventDefault();
