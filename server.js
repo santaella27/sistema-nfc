@@ -16,6 +16,10 @@ for (const v of ["MONGO_URI", "JWT_SECRET"]) {
 const app = express();
 app.set("trust proxy", 1);
 
+app.get('/teste-servidor', (req, res) => {
+  res.send('Servidor ativo e atualizado com sucesso!');
+});
+
 const server = http.createServer(app);
 
 // Socket.io compartilha o mesmo servidor HTTP e fica acessível nas rotas via req.app.get('io')
