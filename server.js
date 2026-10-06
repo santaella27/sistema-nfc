@@ -7,6 +7,7 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const helmet = require("helmet");
 const { iniciarSocket, origensPermitidas } = require("./socket");
+const { Restaurante, Mesa, Usuario } = require("./models");
 
 for (const v of ["MONGO_URI", "JWT_SECRET"]) {
   if (!process.env[v])
@@ -15,11 +16,6 @@ for (const v of ["MONGO_URI", "JWT_SECRET"]) {
 
 const app = express();
 app.set("trust proxy", 1);
-
-// Rota de teste temporária para validar se o Render atualizou
-app.get('/teste-servidor', (req, res) => {
-  res.send('Servidor ativo e atualizado com sucesso!');
-});
 
 const server = http.createServer(app);
 
@@ -49,7 +45,8 @@ app.use(
 app.use(cors({ origin: origensPermitidas() }));
 app.use(express.json({ limit: "50kb" }));
 
-app.use(express.static(path.join(__dirname), { index: false }));
+// ATENÇÃO: não use express.static(__dirname). Isso publicaria server.js, seed.js, routes/ etc.
+// As duas páginas HTML são entregues pelas rotas explícitas abaixo (e só elas).
 
 // API (JSON)
 app.use("/api/auth", require("./routes/auth"));
@@ -83,8 +80,29 @@ const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
+
+  // Diagnóstico: as páginas HTML estão no deploy?
+  for (const [nome, ficheiro] of Object.entries(PAGINAS)) {
+    console.log(`[páginas] ${nome}: ${fs.existsSync(ficheiro) ? "OK" : "NÃO ENCONTRADO"}`);
+  }
+
   mongoose
     .connect(process.env.MONGO_URI)
-    .then(() => console.log("Conectado ao MongoDB com sucesso!"))
+    .then(async () => {
+      // Diagnóstico: em QUAL base o Render está conectado e o que existe nela?
+      console.log(`Conectado ao MongoDB. Base: "${mongoose.connection.name}"`);
+      const [r, m, u] = await Promise.all([
+        Restaurante.countDocuments(),
+        Mesa.countDocuments(),
+        Usuario.countDocuments(),
+      ]);
+      console.log(`[base] restaurantes=${r} mesas=${m} usuarios=${u}`);
+      if (m === 0) {
+        console.warn(
+          '[base] ATENÇÃO: nenhuma mesa nesta base. Confira o nome da base na MONGO_URI do Render ' +
+            "(ex.: ...mongodb.net/NOME_DA_BASE?retryWrites=true...) ou rode 'npm run seed' apontando para ela.",
+        );
+      }
+    })
     .catch((err) => console.error("Falha ao conectar no MongoDB:", err));
 });

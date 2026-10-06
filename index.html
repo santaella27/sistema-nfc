@@ -321,8 +321,12 @@
         }
         const r = await fetch(`${API_BASE}/m/${encodeURIComponent(nfcId)}`);
         const d = await r.json().catch(() => ({}));
-        if (!r.ok)
-          throw new Error(d.erro || "Não foi possível carregar o cardápio");
+        if (!r.ok) {
+          // guarda o status HTTP para a tela de erro mostrar a causa real (404, 500...)
+          const err = new Error(d.erro || `Falha ao carregar o cardápio (HTTP ${r.status})`);
+          err.status = r.status;
+          throw err;
+        }
         return d;
       }
 
@@ -785,9 +789,12 @@
           renderApp();
           conectarSocket(nfcId);
         } catch (e) {
+          // Antes qualquer erro (500, rede, bug) aparecia como "Mesa não encontrada".
+          // Agora só o 404 real tem esse título; os demais mostram a causa.
+          const naoAchou = e.status === 404;
           $("app").innerHTML =
-            `<div class="p-10 text-center"><p class="text-lg font-bold">Mesa não encontrada</p>
-      <p class="mt-2 text-neutral-500">${esc(e.message)}. Aproxime o celular da tag novamente.</p></div>`;
+            `<div class="p-10 text-center"><p class="text-lg font-bold">${naoAchou ? "Mesa não encontrada" : "Não foi possível carregar o cardápio"}</p>
+      <p class="mt-2 text-neutral-500">${esc(e.message)}. ${naoAchou ? "Aproxime o celular da tag novamente." : "Tente recarregar a página."}</p></div>`;
         }
       })();
     </script>
