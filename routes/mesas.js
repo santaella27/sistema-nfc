@@ -1,3 +1,10 @@
+const router = require("express").Router();
+const { Mesa, Produto, SessaoMesa } = require("../models");
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// GET /api/m/:nfcId  -> chamada pelo front quando o cliente aproxima o celular da tag NFC
 router.get("/:nfcId", async (req, res, next) => {
   try {
     const { nfcId } = req.params;
@@ -22,7 +29,7 @@ router.get("/:nfcId", async (req, res, next) => {
       return res.status(404).json({ erro: "Mesa não encontrada" });
     }
 
-    // Sessao da mesa
+    // Comanda da mesa: usa a sessão aberta atual ou cria uma nova se a mesa estiver livre
     const sessao = await SessaoMesa.obterOuCriarAberta(
       mesa._id,
       mesa.restaurante._id
@@ -35,6 +42,7 @@ router.get("/:nfcId", async (req, res, next) => {
       .sort({ categoria: 1, ordem: 1, nome: 1 })
       .lean();
 
+    // Agrupa por categoria para o front renderizar o cardápio direto
     const porCategoria = new Map();
     for (const p of produtos) {
       if (!porCategoria.has(p.categoria)) porCategoria.set(p.categoria, []);
@@ -42,7 +50,7 @@ router.get("/:nfcId", async (req, res, next) => {
         id: p._id,
         nome: p.nome,
         descricao: p.descricao,
-        preco: p.preco,
+        preco: p.preco, // centavos
         imagemUrl: p.imagemUrl,
       });
     }
@@ -59,7 +67,7 @@ router.get("/:nfcId", async (req, res, next) => {
         numero: mesa.numero,
         descricao: mesa.descricao,
       },
-      sessaoId: String(sessao._id),
+      sessaoId: String(sessao._id), // é este valor que o front envia como "sessaoId" no POST /api/pedidos
       cardapio: [...porCategoria].map(([categoria, itens]) => ({
         categoria,
         produtos: itens,
@@ -69,3 +77,5 @@ router.get("/:nfcId", async (req, res, next) => {
     next(err);
   }
 });
+
+module.exports = router;
