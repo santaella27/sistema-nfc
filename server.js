@@ -77,6 +77,9 @@ const enviarPagina = (ficheiro) => (req, res, next) =>
     }
   });
 
+// Redireciona a raiz para o painel automaticamente
+app.get("/", (req, res) => res.redirect("/painel"));
+
 app.get("/m/:nfcId", enviarPagina(PAGINAS.cliente));
 app.get("/painel", enviarPagina(PAGINAS.painel));
 
