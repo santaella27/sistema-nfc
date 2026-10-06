@@ -44,7 +44,9 @@ app.use(
 );
 app.use(cors({ origin: origensPermitidas() }));
 app.use(express.json({ limit: "50kb" }));
-app.use(express.static(path.join(__dirname)));
+
+// IMPORTANTE: index: false impede que o express sirva o index.html na raiz automaticamente
+app.use(express.static(path.join(__dirname), { index: false }));
 
 // API (JSON)
 app.use("/api/auth", require("./routes/auth"));
